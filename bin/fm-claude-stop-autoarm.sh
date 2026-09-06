@@ -35,8 +35,10 @@
 #   - Foreground arm: the owner runs bin/fm-watch-arm.sh in the FOREGROUND of
 #     this hook-owned process tree (never shell &); Claude owns the process
 #     group, so its timeout/session teardown kills arm and watcher together.
-#   - Translation: while supervision is still needed and AFK remains inactive,
-#     an actionable arm close (signal:/stale:/check:/heartbeat) prints one
+#   - Translation: while supervision is still needed, or the cycle left a wake
+#     queued for the model even though its last source retired, and AFK
+#     remains inactive, an actionable arm close
+#     (signal:/stale:/check:/heartbeat) prints one
 #     rewake banner to stderr and exits 2, which wakes Claude even while idle
 #     ("Stop hook feedback"). The irrevocable commit point is the EXIT STATUS:
 #     the harness delivers the collected stderr only on exit 2, so an owned
@@ -248,8 +250,11 @@ while [ "$attempt" -lt "$AUTOARM_ATTEMPTS" ]; do
 done
 
 # The need may have vanished mid-cycle (fleet torn down, X opted out): nothing
-# left to supervise, so close quietly instead of waking the model.
-if ! need_supervision; then
+# left to supervise, so close quietly instead of waking the model - unless the
+# cycle left a durable wake queued. A when-watch retires its source on firing,
+# so its wake is the last thing standing in the home; closing quietly here is
+# exactly the lost rouse fm_supervision_wake_pending exists to prevent.
+if ! need_supervision && ! fm_supervision_wake_pending "$STATE"; then
   autoarm_record clean
   [ -z "$OUT" ] || rm -f "$OUT" 2>/dev/null || true
   exit 0

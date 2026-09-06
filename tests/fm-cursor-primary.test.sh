@@ -115,6 +115,23 @@ printf 'watcher: FAILED - no live watcher with a fresh beacon\n'
 exit 1
 SH
       ;;
+    vanishes-queued)
+      # The when-watch shape: the park's last source retires itself on firing
+      # and the watcher queues the durable wake in the same close.
+      cat > "$dir/bin/fm-watch-arm.sh" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$$" >> "$FM_HOME/state/arm-ran"
+rm -f "$FM_HOME"/state/*.meta
+FM_STATE_OVERRIDE="$FM_HOME/state" bash -c '
+  # shellcheck disable=SC1090,SC1091
+  . "$1"
+  fm_wake_append check "procevent:when-fixture:1" "check: procevent when when-fixture 1"
+' _ "$FM_HOME/bin/fm-wake-lib.sh"
+printf 'watcher: started pid=%s (beacon fresh)\n' "$$"
+printf 'check: procevent when when-fixture 1\n'
+exit 0
+SH
+      ;;
     switchable)
       # Slow until state/arm-fast appears, so a second invocation can be made
       # fast WITHOUT rewriting a script the first one is still executing.
@@ -289,6 +306,21 @@ test_park_delivers_actionable_wake_as_followup() {
   case "$body" in *'stale: fixture-win needs a look'*) ;; *) fail "the wake reason was not carried into the follow-up: $body" ;; esac
   case "$body" in *'fm-wake-drain.sh'*) ;; *) fail "the follow-up must tell the session to drain first: $body" ;; esac
   pass "cursor park: an actionable close is delivered as one watcher-kind follow-up"
+}
+
+test_park_delivers_queued_wake_after_need_vanished() {
+  local dir out body
+  dir=$(make_primary_dir "$TMP_ROOT/park-vanished-queued")
+  : > "$dir/state/task1.meta"
+  write_arm_fixture "$dir" vanishes-queued
+  out=$(run_park "$dir")
+  [ -e "$dir/state/arm-ran" ] || fail "the park did not run the arm"
+  [ "$(kind_of_followup "$out")" = watcher ] \
+    || fail "a wake queued by the park must be delivered even though its source retired, got: $out"
+  body=$(followup_of "$out")
+  case "$body" in *'check: procevent when when-fixture 1'*) ;; *) fail "the queued wake's reason was not carried into the follow-up: $body" ;; esac
+  [ -s "$dir/state/.wake-queue" ] || fail "the durable wake must survive until the handling turn acknowledges it"
+  pass "cursor park: a queued wake outlives its retired source and is still delivered"
 }
 
 test_park_never_exits_two() {
@@ -686,6 +718,7 @@ test_pretool_guards_deduplicate_and_render_cursor_deny
 test_cd_guard_renders_cursor_deny
 test_park_silent_when_nothing_in_flight
 test_park_delivers_actionable_wake_as_followup
+test_park_delivers_queued_wake_after_need_vanished
 test_park_never_exits_two
 test_park_repair_nag_is_bounded
 test_park_repair_nag_requires_a_persisted_budget
