@@ -32,7 +32,8 @@ fm_sup_stat_mtime() {
 #   FM_SUP_BEACON_DESC    human-readable beacon age, for banners ("never" if absent)
 #   FM_SUP_QUEUE_PENDING  true/false - state/.wake-queue has unread records
 # grace-seconds defaults to $FM_GUARD_GRACE, then 300, matching fm-guard.sh.
-# Always returns 0; callers read the vars, or use fm_supervision_unhealthy below.
+# Always returns 0; callers read the vars, or use fm_supervision_unhealthy or
+# fm_supervision_wake_pending below.
 fm_supervision_status() {
   local state=$1 grace=${2:-${FM_GUARD_GRACE:-300}} meta source beat m age
   FM_SUP_IN_FLIGHT=0
@@ -79,6 +80,16 @@ fm_supervision_status() {
 fm_supervision_needed() {
   fm_supervision_status "$@"
   [ "$FM_SUP_NEEDED" = true ]
+}
+
+# fm_supervision_wake_pending <state-dir>
+# Exit 0 (true) exactly when state/.wake-queue holds unread records.
+# A queued wake is owed a handling turn even when nothing is left to supervise:
+# a condition watch retires its own source the moment it fires, so a hook that
+# tests only fm_supervision_needed after the cycle would discard the very wake
+# that cycle just queued. Turn-end owners check this before a quiet close.
+fm_supervision_wake_pending() {
+  [ -s "$1/.wake-queue" ]
 }
 
 # fm_supervision_unhealthy <state-dir> [grace-seconds]

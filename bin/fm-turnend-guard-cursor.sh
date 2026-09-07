@@ -350,8 +350,10 @@ while [ "$attempt" -lt "$ARM_ATTEMPTS" ]; do
 done
 
 # The need may have vanished while parked - the fleet was torn down, or Relay
-# was opted out. Nothing left to supervise, so end the turn quietly.
-if ! fm_supervision_needed "$STATE" "$GRACE"; then
+# was opted out. Nothing left to supervise, so end the turn quietly - unless the
+# park left a durable wake queued: a when-watch retires its source on firing, and
+# that wake still needs its handling turn (fm_supervision_wake_pending).
+if ! fm_supervision_needed "$STATE" "$GRACE" && ! fm_supervision_wake_pending "$STATE"; then
   budget_reset_if_ours
   exit 0
 fi

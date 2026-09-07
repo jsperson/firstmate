@@ -166,6 +166,23 @@ printf 'signal: task.status done: fixture\n'
 exit 0
 SH
       ;;
+    meta-vanishes-queued)
+      # The when-watch shape: the cycle's last source retires itself on firing
+      # and the watcher queues the durable wake in the same close.
+      cat > "$dir/bin/fm-watch-arm.sh" <<'SH'
+#!/usr/bin/env bash
+echo "$$" >> "$FM_HOME/state/arm-ran"
+rm -f "$FM_HOME/state/task.meta"
+FM_STATE_OVERRIDE="$FM_HOME/state" bash -c '
+  # shellcheck disable=SC1090,SC1091
+  . "$1"
+  fm_wake_append check "procevent:when-fixture:1" "check: procevent when when-fixture 1"
+' _ "$FM_HOME/bin/fm-wake-lib.sh"
+printf 'watcher: started pid=%s (beacon fresh)\n' "$$"
+printf 'check: procevent when when-fixture 1\n'
+exit 0
+SH
+      ;;
     afk-appears)
       cat > "$dir/bin/fm-watch-arm.sh" <<'SH'
 #!/usr/bin/env bash
@@ -1118,6 +1135,20 @@ test_need_vanished_mid_cycle_closes_quietly() {
   pass "auto-arm: need vanishing mid-cycle closes without a rewake"
 }
 
+test_need_vanished_with_queued_wake_still_rewakes() {
+  local dir out status
+  dir=$(make_primary_dir "$TMP_ROOT/vanished-queued")
+  : > "$dir/state/task.meta"
+  write_arm_fixture "$dir" meta-vanishes-queued
+  out=$(run_autoarm "$dir" 2>/dev/null); status=$?
+  expect_code 2 "$status" "a wake queued by the cycle must rewake even though its source retired with it"
+  assert_contains "$out" "firstmate watcher wake" "rewake must carry the wake banner"
+  assert_contains "$out" "check: procevent when when-fixture 1" "rewake must carry the queued wake's reason line"
+  [ "$(epoch_outcome "$dir")" = rewake ] || fail "epoch must record outcome=rewake, got: $(epoch_outcome "$dir")"
+  [ -s "$dir/state/.wake-queue" ] || fail "the durable wake must survive until the handling turn acknowledges it"
+  pass "auto-arm: a queued wake outlives its retired source and still rouses the model"
+}
+
 test_afk_mid_cycle_suppresses_rewake() {
   local dir out status
   dir=$(make_primary_dir "$TMP_ROOT/afk-mid")
@@ -1185,6 +1216,7 @@ test_identityless_ledger_never_defers
 test_superseded_owner_never_reinvokes_the_arm
 test_superseded_owner_goes_silent_and_never_double_translates
 test_need_vanished_mid_cycle_closes_quietly
+test_need_vanished_with_queued_wake_still_rewakes
 test_afk_mid_cycle_suppresses_rewake
 test_active_in_marked_secondmate_home
 test_fm_lock_status_still_works_with_shared_lib
